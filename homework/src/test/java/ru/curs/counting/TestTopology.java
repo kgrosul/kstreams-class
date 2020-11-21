@@ -1,11 +1,7 @@
 package test.java.ru.curs.homework;
 
 import org.apache.kafka.common.serialization.Serdes;
-import org.apache.kafka.streams.StreamsBuilder;
-import org.apache.kafka.streams.TestInputTopic;
-import org.apache.kafka.streams.TestOutputTopic;
-import org.apache.kafka.streams.Topology;
-import org.apache.kafka.streams.TopologyTestDriver;
+import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.test.TestRecord;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +12,8 @@ import ru.curs.counting.model.*;
 import ru.curs.homework.configuration.KafkaConfiguration;
 import ru.curs.homework.configuration.TopologyConfiguration;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.NoSuchElementException;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -247,6 +245,40 @@ public class TestTopology {
 
         assertEquals(exppectedFraud, fraudTopic.readValue());
         assertTrue(fraudTopic.isEmpty());
+    }
+
+
+
+    @Test
+    void testFraud() {
+        long currentTimestamp = System.currentTimeMillis();
+        Score score = new Score().goalHome();
+        putScore(new EventScore("A-B", score, currentTimestamp));
+        score = score.goalHome();
+        putScore(new EventScore("A-B", score, currentTimestamp + 100 * 1000));
+        score = score.goalAway();
+        putScore(new EventScore("A-B", score, currentTimestamp + 200 * 1000));
+        //ok
+        putBet(new Bet("John", "A-B", Outcome.H, 1, 1, currentTimestamp - 2000));
+        //ok
+        putBet(new Bet("Sara", "A-B", Outcome.H, 1, 1, currentTimestamp + 100 * 1000 - 2000));
+        //fraud?
+        putBet(new Bet("Sara", "A-B", Outcome.H, 1, 1, currentTimestamp + 100 * 1000 - 10));
+        //fraud?
+        putBet(new Bet("Mary", "A-B", Outcome.A, 1, 1, currentTimestamp + 200 * 1000 - 20));
+        Fraud expected1 = Fraud.builder()
+                .bettor("Sara").match("A-B").outcome(Outcome.H).amount(1).odds(1)
+                .lag(10)
+                .build();
+        Fraud expected2 = Fraud.builder()
+                .bettor("Mary").match("A-B").outcome(Outcome.A).amount(1).odds(1)
+                .lag(20)
+                .build();
+        List<KeyValue<String, Fraud>> expected = new ArrayList<>();
+        expected.add(KeyValue.pair("Sara", expected1));
+        expected.add(KeyValue.pair("Mary", expected2));
+        List<KeyValue<String, Fraud>> actual = fraudTopic.readKeyValuesToList();
+        assertEquals(expected, actual);
     }
 
 }

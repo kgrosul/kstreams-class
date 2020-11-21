@@ -11,7 +11,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.support.serializer.JsonSerde;
 import ru.curs.counting.model.*;
 import ru.curs.homework.transformer.ScoreTransformer;
-import ru.curs.homework.transformer.TotallingTransformer;
 
 
 import java.time.Duration;
@@ -65,7 +64,7 @@ public class TopologyConfiguration {
 
 
 
-        /* Поток, превращающий ставку в пару (пользователб, сумма ставки) */
+        /* Поток, превращающий ставку в пару (пользователь, сумма ставки) */
         KStream<String, Long> bettorGain =
                 input.map((key, value) -> {
                     String name = value.getBettor();
@@ -73,12 +72,14 @@ public class TopologyConfiguration {
                     return KeyValue.pair(name, amount);
                 });
 
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         /* Таблица, по ключу выдающая сумму ставок, сделланных данным пользователем, 1-ая часть дз */
-        KTable<String, Long> bettorAmount = new TotallingTransformer(BETTOR_MONEY_STORE)
-                .transformStream(streamsBuilder, bettorGain)
+        KTable<String, Long> bettorAmount = bettorGain
                 .groupByKey(Grouped.with(Serdes.String(), new JsonSerde<>(Long.class)))
-                .reduce((k, v) -> v);
+                .reduce(Long::sum);
+
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         /* Поток, превращающий ставку в пару (команда, сумма ставки) */
         KStream<String, Long> commandGain = input
@@ -90,30 +91,34 @@ public class TopologyConfiguration {
                 });
 
         /* Таблица, по ключу выдающая сумму ставок, сделланных на данную команду, 2-ая часть дз */
-        KTable<String, Long> commandAmount = new TotallingTransformer(COMMAND_MONEY_STORE)
-                .transformStream(streamsBuilder, commandGain)
+        KTable<String, Long> commandAmount = commandGain
                 .groupByKey(Grouped.with(Serdes.String(), new JsonSerde<>(Long.class)))
-                .reduce((k, v) -> v);
+                .reduce(Long::sum);
+
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 
         /* Поток ставок на выигрыш */
         KStream<String, Bet> winningBets = new ScoreTransformer().transformStream(streamsBuilder, eventScores);
 
         /* Поток подозрительных ставок, 3 часть дз */
-        KStream<String, Fraud> fraud = input.join(winningBets,
-                (bet, winningBet) ->
-                        Fraud.builder()
-                                .bettor(bet.getBettor())
-                                .outcome(bet.getOutcome())
-                                .amount(bet.getAmount())
-                                .match(bet.getMatch())
-                                .odds(bet.getOdds())
-                                .lag(winningBet.getTimestamp() - bet.getTimestamp())
-                                .build(),
-                JoinWindows.of(Duration.ofSeconds(1)).before(Duration.ZERO),
-                StreamJoined.with(Serdes.String(),
-                        new JsonSerde<>(Bet.class),
-                        new JsonSerde<>(Bet.class)
-                ));
+        KStream<String, Fraud> fraud = input.
+                join(winningBets, (bet, winningBet) ->
+                                Fraud.builder()
+                                        .bettor(bet.getBettor())
+                                        .outcome(bet.getOutcome())
+                                        .amount(bet.getAmount())
+                                        .match(bet.getMatch())
+                                        .odds(bet.getOdds())
+                                        .lag(winningBet.getTimestamp() - bet.getTimestamp())
+                                        .build(),
+                        JoinWindows.of(Duration.ofSeconds(1)).before(Duration.ZERO),
+                        StreamJoined.with(Serdes.String(),
+                                new JsonSerde<>(Bet.class),
+                                new JsonSerde<>(Bet.class)
+                        ))
+                .selectKey((key, value) -> value.getBettor());
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         bettorAmount.toStream().to(BETTOR_MONEY_TOPIC, Produced.with(Serdes.String(),
                 new JsonSerde<>(Long.class)));
