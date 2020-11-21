@@ -62,7 +62,7 @@ public class TopologyConfiguration {
              }
          */
 
-
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         /* Поток, превращающий ставку в пару (пользователь, сумма ставки) */
         KStream<String, Long> bettorGain =
@@ -72,7 +72,6 @@ public class TopologyConfiguration {
                     return KeyValue.pair(name, amount);
                 });
 
-        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         /* Таблица, по ключу выдающая сумму ставок, сделланных данным пользователем, 1-ая часть дз */
         KTable<String, Long> bettorAmount = bettorGain
@@ -97,7 +96,6 @@ public class TopologyConfiguration {
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-
         /* Поток ставок на выигрыш */
         KStream<String, Bet> winningBets = new ScoreTransformer().transformStream(streamsBuilder, eventScores);
 
@@ -118,6 +116,7 @@ public class TopologyConfiguration {
                                 new JsonSerde<>(Bet.class)
                         ))
                 .selectKey((key, value) -> value.getBettor());
+        
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         bettorAmount.toStream().to(BETTOR_MONEY_TOPIC, Produced.with(Serdes.String(),
